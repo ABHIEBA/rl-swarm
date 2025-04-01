@@ -39,6 +39,7 @@ while true; do
 done
 
 if [ "$CONNECT_TO_TESTNET" = "True" ]; then
+    # Colors for better readability
     RED='\033[0;31m'
     GREEN='\033[0;32m'
     YELLOW='\033[0;33m'
@@ -46,10 +47,12 @@ if [ "$CONNECT_TO_TESTNET" = "True" ]; then
     BOLD='\033[1m'
     NC='\033[0m' # No Color
 
+    # Function to display step headers
     print_step() {
         echo -e "\n${BLUE}${BOLD}Step $1: $2${NC}"
     }
 
+    # Function to check if command was successful
     check_success() {
         if [ $? -eq 0 ]; then
             echo -e "${GREEN}✓ Success!${NC}"
@@ -162,13 +165,17 @@ if [ "$CONNECT_TO_TESTNET" = "True" ]; then
     yarn install
     yarn dev > /dev/null 2>&1 & # Run in background and suppress output
     SERVER_PID=$!  # Store the process ID
-    sleep 3
+    sleep 5
 
     # Start ngrok tunnel
     print_step 4 "Starting ngrok tunnel on port 3000"
     echo -e "${YELLOW}Starting ngrok HTTPS tunnel on port 3000...${NC}"
+
+    # First, make sure no existing ngrok processes are running
     pkill -f ngrok
     sleep 2
+
+    # Start ngrok
     ngrok http 3000 --log=stdout >/dev/null 2>&1 &
     NGROK_PID=$!
 
@@ -207,19 +214,20 @@ if [ "$CONNECT_TO_TESTNET" = "True" ]; then
     fi
 
     cd ..
-    
+
+    # Wait until modal-login/temp-data/userData.json exists
     while [ ! -f "modal-login/temp-data/userData.json" ]; do
         echo "Waiting for userData.json to be created..."
-        sleep 5  # Wait for 5 seconds before checking again
+        sleep 3  # Wait for 3 seconds before checking again
     done
     echo "userData.json found. Proceeding..."
 
     ORG_ID=$(awk 'BEGIN { FS = "\"" } !/^[ \t]*[{}]/ { print $(NF - 1); exit }' modal-login/temp-data/userData.json)
     echo "ORG_ID set to: $ORG_ID"
 
+    # Function to clean up the server and ngrok processes
     cleanup() {
         echo "Shutting down server and ngrok..."
-        pkill -f ngrok
         kill $SERVER_PID 2>/dev/null || true
         kill $NGROK_PID 2>/dev/null || true
         rm -r modal-login/temp-data/*.json 2>/dev/null || true
