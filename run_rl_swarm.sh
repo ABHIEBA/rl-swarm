@@ -135,10 +135,21 @@ if [ "$CONNECT_TO_TESTNET" = "True" ]; then
         echo "4. Copy that auth token and paste in the below section"
         echo -e "\n${BOLD}Please enter your ngrok authtoken:${NC}"
         read -p "> " NGROK_TOKEN
-
+    
         if [ -z "$NGROK_TOKEN" ]; then
             echo -e "${RED}No token provided. Please enter a valid token.${NC}"
             continue
+        fi
+    
+        # Authenticate ngrok
+        ngrok authtoken "$NGROK_TOKEN"
+        
+        # Check if authentication was successful
+        if [ $? -eq 0 ]; then
+            echo -e "${GREEN}✓ Successfully authenticated ngrok!${NC}"
+            break
+        else
+            echo -e "${RED}✗ Authentication failed. Please check your token and try again.${NC}"
         fi
     done
 
