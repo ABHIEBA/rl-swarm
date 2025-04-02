@@ -1,7 +1,9 @@
 #!/bin/bash
 
+# Set the root directory to the current working directory
 ROOT=$PWD
 
+# Export environment variables
 export PUB_MULTI_ADDRS
 export PEER_MULTI_ADDRS
 export HOST_MULTI_ADDRS
@@ -10,6 +12,7 @@ export CONNECT_TO_TESTNET
 export ORG_ID
 export HF_HUB_DOWNLOAD_TIMEOUT=120
 
+# Set default values for environment variables if not already defined
 DEFAULT_PUB_MULTI_ADDRS=""
 PUB_MULTI_ADDRS=${PUB_MULTI_ADDRS:-$DEFAULT_PUB_MULTI_ADDRS}
 
@@ -22,6 +25,7 @@ HOST_MULTI_ADDRS=${HOST_MULTI_ADDRS:-$DEFAULT_HOST_MULTI_ADDRS}
 DEFAULT_IDENTITY_PATH="$ROOT"/swarm.pem
 IDENTITY_PATH=${IDENTITY_PATH:-$DEFAULT_IDENTITY_PATH}
 
+# Prompt user to connect to Testnet
 while true; do
     read -p "Would you like to connect to the Testnet? [Y/n] " yn
     yn=${yn:-Y}
@@ -36,6 +40,8 @@ if [ "$CONNECT_TO_TESTNET" = "True" ]; then
     echo "Please login to create an Ethereum Server Wallet"
     cd modal-login
     source ~/.bashrc
+
+    # Install Yarn if not present
     if ! command -v yarn >/dev/null 2>&1; then
         echo "Yarn is not installed. Installing Yarn..."
         curl -o- -L https://yarnpkg.com/install.sh | sh
@@ -44,6 +50,7 @@ if [ "$CONNECT_TO_TESTNET" = "True" ]; then
     fi
     yarn install
 
+    # Start the development server in the background
     echo "Starting the development server..."
     yarn next dev > server.log 2>&1 &
     SERVER_PID=$!
@@ -71,6 +78,7 @@ if [ "$CONNECT_TO_TESTNET" = "True" ]; then
         exit 1
     fi
 
+    # Define color codes for output
     RED='\033[0;31m'
     GREEN='\033[0;32m'
     YELLOW='\033[0;33m'
@@ -150,7 +158,6 @@ if [ "$CONNECT_TO_TESTNET" = "True" ]; then
     done
 
     print_step 4 "Checking ngrok web interface port availability"
-    
     if lsof -i :4040 >/dev/null 2>&1; then
         echo -e "${YELLOW}Port 4040 is in use.${NC}"
         PID=$(lsof -t -i :4040)
@@ -172,12 +179,11 @@ if [ "$CONNECT_TO_TESTNET" = "True" ]; then
     pkill -f ngrok
     sleep 2
     
-    
     ngrok http "$PORT" > ngrok.log 2>&1 &
     NGROK_PID=$!
     
-    echo -n "Waiting for ngrok to initialize"
-    MAX_WAIT=30
+    echo "Waiting for ngrok to initialize"
+    MAX_WAIT=10
     counter=0
     
     while [ $counter -lt $MAX_WAIT ]; do
@@ -191,35 +197,35 @@ if [ "$CONNECT_TO_TESTNET" = "True" ]; then
     done
     
     if [ $counter -eq $MAX_WAIT ]; then
-        echo -e "\n${RED}Timeout waiting for ngrok API.${NC}"
-        echo "Check ngrok.log for details:"
-        cat ngrok.log
-        kill $NGROK_PID 2>/dev/null || true
-        exit 1
-    fi
-    
-    FORWARDING_URL=$(curl -s http://localhost:4040/api/tunnels | grep -o '"public_url":"https://[^"]*' | head -n1 | cut -d'"' -f4)
-    
-    if [ -z "$FORWARDING_URL" ]; then
-        echo -e "${RED}Failed to get forwarding URL from ngrok API.${NC}"
-        echo "Check ngrok.log for details:"
-        cat ngrok.log
-        kill $NGROK_PID 2>/dev/null || true
-        exit 1
+        echo -e "${RED}Timeout waiting for ngrok API.${NC}"
+        FORWARDING_URL=""
     else
-        echo -e "${GREEN}${BOLD}✓ Success! Visit this website and login using your email${NC} : ${BLUE}${BOLD}${FORWARDING_URL}${NC}"
+        FORWARDING_URL=$(curl -s http://localhost:4040/api/tunnels | grep -o '"public_url":"https://[^"]*' | head -n1 | cut -d'"' -f4)
     fi
-
+    
+    if [ -n "$FORWARDING_URL" ]; then
+        echo -e "${GREEN}${BOLD}✓ Success! Visit this website and login using your email${NC} : ${BLUE}${BOLD}${FORWARDING_URL}${NC}"
+    else
+        echo -e "\n${YELLOW}Don't worry, follow these instructions:\n${NC}"
+        echo "1. Open Command Prompt on your PC."
+        echo -e "2. Paste this command into Command Prompt: ssh -L 3000:localhost:$PORT $(whoami)@$(curl -s ifconfig.me)"
+        echo "3. After that, visit this website and log in using your email: http://localhost:3000/"
+        echo "4. The above website may take up to 1 minute to be fully ready."
+        kill $NGROK_PID 2>/dev/null || true
+    fi
+    
     cd ..
+    echo -e "\nWaiting for you to complete the login process..."
     while [ ! -f "modal-login/temp-data/userData.json" ]; do
-        echo "Waiting for userData.json to be created..."
         sleep 5
     done
-    echo "userData.json found. Proceeding..."
+    echo -e "\n${GREEN}${BOLD}✓ Success! userData.json found. Proceeding...${NC}"
 
+    # Extract ORG_ID from userData.json
     ORG_ID=$(awk 'BEGIN { FS = "\"" } !/^[ \t]*[{}]/ { print $(NF - 1); exit }' modal-login/temp-data/userData.json)
     echo "ORG_ID set to: $ORG_ID"
 
+    # Cleanup function for graceful shutdown
     cleanup() {
         echo "Shutting down server and ngrok..."
         kill $SERVER_PID 2>/dev/null || true
@@ -230,10 +236,12 @@ if [ "$CONNECT_TO_TESTNET" = "True" ]; then
     trap cleanup INT
 fi
 
+# Install Python requirements
 echo "Getting requirements..."
 pip install -r "$ROOT"/requirements-hivemind.txt > /dev/null
 pip install -r "$ROOT"/requirements.txt > /dev/null
 
+# Determine config path based on hardware
 if ! which nvidia-smi; then
     CONFIG_PATH="$ROOT/hivemind_exp/configs/mac/grpo-qwen-2.5-0.5b-deepseek-r1.yaml"
 elif [ -n "$CPU_ONLY" ]; then
@@ -246,6 +254,7 @@ fi
 echo ">> Done!"
 echo ""
 
+# Handle Hugging Face token
 if [ -n "${HF_TOKEN}" ]; then
     HUGGINGFACE_ACCESS_TOKEN=${HF_TOKEN}
 else
@@ -261,6 +270,7 @@ fi
 echo ""
 echo "Good luck in the swarm!"
 
+# Run the Python training script with appropriate parameters
 if [ -n "$ORG_ID" ]; then
     python -m hivemind_exp.gsm8k.train_single_gpu \
         --hf_token "$HUGGINGFACE_ACCESS_TOKEN" \
