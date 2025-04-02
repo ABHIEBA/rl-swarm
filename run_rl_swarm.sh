@@ -51,11 +51,37 @@ if [ "$CONNECT_TO_TESTNET" = "True" ]; then
       source ~/.bashrc
     fi
     yarn install
-    yarn dev > /dev/null 2>&1 & # Run in background and suppress output
-    SERVER_PID=$!  # Store the process ID
-    sleep 5
 
-    # Colors for better readability
+    # Start the Next.js dev server and redirect output to a log file
+    echo "Starting the development server..."
+    yarn next dev > server.log 2>&1 &
+    SERVER_PID=$!
+    
+    echo "Waiting for server to start..."
+    MAX_WAIT=60  # Timeout after 60 seconds
+    counter=0
+    while [ $counter -lt $MAX_WAIT ]; do
+        if grep -q "Local:        http://localhost:" server.log; then
+            PORT=$(grep "Local:        http://localhost:" server.log | sed -n 's/.*http:\/\/localhost:\([0-9]*\).*/\1/p')
+            if [ -n "$PORT" ]; then
+                echo "Server is running on port $PORT"
+                break
+            fi
+        fi
+        sleep 1
+        counter=$((counter + 1))
+    done
+    
+    # If the server doesn’t start in time, show debug info and exit
+    if [ $counter -eq $MAX_WAIT ]; then
+        echo "Timeout waiting for server to start."
+        echo "Contents of server.log:"
+        cat server.log
+        kill $SERVER_PID 2>/dev/null || true
+        exit 1
+    fi
+
+    # Colors for better readability (unchanged from original)
     RED='\033[0;31m'
     GREEN='\033[0;32m'
     YELLOW='\033[0;33m'
@@ -63,12 +89,12 @@ if [ "$CONNECT_TO_TESTNET" = "True" ]; then
     BOLD='\033[1m'
     NC='\033[0m' # No Color
 
-    # Function to display step headers
+    # Function to display step headers (unchanged)
     print_step() {
         echo -e "\n${BLUE}${BOLD}Step $1: $2${NC}"
     }
 
-    # Function to check if command was successful
+    # Function to check if command was successful (unchanged)
     check_success() {
         if [ $? -eq 0 ]; then
             echo -e "${GREEN}✓ Success!${NC}"
@@ -78,7 +104,7 @@ if [ "$CONNECT_TO_TESTNET" = "True" ]; then
         fi
     }
 
-    # Detect architecture
+    # Detect architecture (unchanged)
     print_step 1 "Detecting system architecture"
     ARCH=$(uname -m)
     OS=$(uname -s | tr '[:upper:]' '[:lower:]')
@@ -97,7 +123,7 @@ if [ "$CONNECT_TO_TESTNET" = "True" ]; then
         exit 1
     fi
 
-    # Download and install ngrok
+    # Download and install ngrok (unchanged)
     print_step 2 "Downloading and installing ngrok"
     echo -e "Downloading ngrok for $OS-$NGROK_ARCH..."
     wget -q --show-progress "https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-$OS-$NGROK_ARCH.tgz"
@@ -115,6 +141,7 @@ if [ "$CONNECT_TO_TESTNET" = "True" ]; then
     rm "ngrok-v3-stable-$OS-$NGROK_ARCH.tgz"
     check_success
 
+    # Authenticate ngrok (unchanged)
     print_step 3 "Authenticating ngrok"
     while true; do
         echo -e "\n${YELLOW}To get your authtoken:${NC}"
@@ -130,10 +157,7 @@ if [ "$CONNECT_TO_TESTNET" = "True" ]; then
             continue
         fi
     
-        # Authenticate ngrok
         ngrok authtoken "$NGROK_TOKEN"
-        
-        # Check if authentication was successful
         if [ $? -eq 0 ]; then
             echo -e "${GREEN}✓ Successfully authenticated ngrok!${NC}"
             break
@@ -142,14 +166,12 @@ if [ "$CONNECT_TO_TESTNET" = "True" ]; then
         fi
     done
 
-    # Start ngrok tunnel
-    print_step 4 "Starting ngrok tunnel on port 3000"
-    echo -e "${YELLOW}Starting ngrok HTTPS tunnel forwarding localhost:3000...${NC}"
-    # Ensure no existing ngrok processes are running
+    # Start ngrok tunnel using the dynamically determined port
+    print_step 4 "Starting ngrok tunnel on port $PORT"
+    echo -e "${YELLOW}Starting ngrok HTTPS tunnel forwarding localhost:$PORT...${NC}"
     pkill -f ngrok
     sleep 2
-    # Start ngrok in background, forwarding to localhost:3000
-    ngrok http 3000 --log=stdout >/dev/null 2>&1 &
+    ngrok http "$PORT" --log=stdout >/dev/null 2>&1 &
     NGROK_PID=$!
     # Wait for ngrok to start (30 seconds max)
     echo -n "Waiting for ngrok to initialize"
@@ -158,7 +180,6 @@ if [ "$CONNECT_TO_TESTNET" = "True" ]; then
     while [ $counter -lt $MAX_WAIT ]; do
         echo -n "."
         sleep 1
-        # Check if the API is ready
         if curl -s http://localhost:4040/api/tunnels >/dev/null; then
             echo " Ready!"
             break
@@ -183,17 +204,17 @@ if [ "$CONNECT_TO_TESTNET" = "True" ]; then
     fi
 
     cd ..
-    # Wait until modal-login/temp-data/userData.json exists
+    # Wait until modal-login/temp-data/userData.json exists (unchanged)
     while [ ! -f "modal-login/temp-data/userData.json" ]; do
         echo "Waiting for userData.json to be created..."
-        sleep 5  # Wait for 5 seconds before checking again
+        sleep 5
     done
     echo "userData.json found. Proceeding..."
 
     ORG_ID=$(awk 'BEGIN { FS = "\"" } !/^[ \t]*[{}]/ { print $(NF - 1); exit }' modal-login/temp-data/userData.json)
     echo "ORG_ID set to: $ORG_ID"
 
-    # Function to clean up the server and ngrok processes
+    # Function to clean up the server and ngrok processes (unchanged)
     cleanup() {
         echo "Shutting down server and ngrok..."
         kill $SERVER_PID 2>/dev/null || true
@@ -201,7 +222,7 @@ if [ "$CONNECT_TO_TESTNET" = "True" ]; then
         exit 0
     }
 
-    # Set up trap to catch Ctrl+C and call cleanup
+    # Set up trap to catch Ctrl+C and call cleanup (unchanged)
     trap cleanup INT
 fi
 
