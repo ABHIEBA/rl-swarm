@@ -228,7 +228,6 @@ if [ "$CONNECT_TO_TESTNET" = "True" ]; then
         echo "Shutting down server and ngrok..."
         kill $SERVER_PID 2>/dev/null || true
         kill $NGROK_PID 2>/dev/null || true
-        rm -r modal-login/temp-data/*.json 2>/dev/null || true
         exit 0
     }
 
