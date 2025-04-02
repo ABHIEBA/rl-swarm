@@ -115,17 +115,6 @@ if [ "$CONNECT_TO_TESTNET" = "True" ]; then
     rm "ngrok-v3-stable-$OS-$NGROK_ARCH.tgz"
     check_success
 
-    # Get the server's external IP
-    SERVER_IP=$(hostname -I | awk '{print $1}')
-    if [[ -z "$SERVER_IP" || "$SERVER_IP" == "127.0.0.1" ]]; then
-        SERVER_IP=$(curl -s ifconfig.me)  # Directly get the external IP
-    fi
-    if [ -z "$SERVER_IP" ]; then
-        echo -e "${RED}Could not determine server IP. Defaulting to localhost.${NC}"
-        SERVER_IP="127.0.0.1"
-    fi
-    echo "Server IP determined as: $SERVER_IP"
-
     print_step 3 "Authenticating ngrok"
     while true; do
         echo -e "\n${YELLOW}To get your authtoken:${NC}"
@@ -155,12 +144,12 @@ if [ "$CONNECT_TO_TESTNET" = "True" ]; then
 
     # Start ngrok tunnel
     print_step 4 "Starting ngrok tunnel on port 3000"
-    echo -e "${YELLOW}Starting ngrok HTTPS tunnel forwarding ${SERVER_IP}:3000...${NC}"
+    echo -e "${YELLOW}Starting ngrok HTTPS tunnel forwarding localhost:3000...${NC}"
     # Ensure no existing ngrok processes are running
     pkill -f ngrok
     sleep 2
-    # Start ngrok in background, forwarding the server's external IP
-    ngrok http "$SERVER_IP:3000" --log=stdout >/dev/null 2>&1 &
+    # Start ngrok in background, forwarding to localhost:3000
+    ngrok http 3000 --log=stdout >/dev/null 2>&1 &
     NGROK_PID=$!
     # Wait for ngrok to start (30 seconds max)
     echo -n "Waiting for ngrok to initialize"
