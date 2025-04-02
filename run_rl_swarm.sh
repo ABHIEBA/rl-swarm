@@ -150,20 +150,6 @@ if [ "$CONNECT_TO_TESTNET" = "True" ]; then
     done
 
     print_step 4 "Checking ngrok web interface port availability"
-    if ! command -v lsof &> /dev/null; then
-        echo "lsof is not installed. Installing lsof..."
-        if command -v apt-get &> /dev/null; then
-            sudo apt-get update && sudo apt-get install -y lsof
-        elif command -v yum &> /dev/null; then
-            sudo yum install -y lsof
-        elif command -v brew &> /dev/null; then
-            brew install lsof
-        else
-            echo -e "${RED}Could not install lsof. Please install it manually and retry.${NC}"
-            exit 1
-        fi
-        check_success
-    fi
     
     if lsof -i :4040 >/dev/null 2>&1; then
         echo -e "${YELLOW}Port 4040 is in use.${NC}"
