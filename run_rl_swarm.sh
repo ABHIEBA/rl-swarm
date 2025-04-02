@@ -140,36 +140,6 @@ if [ "$CONNECT_TO_TESTNET" = "True" ]; then
             echo -e "${RED}No token provided. Please enter a valid token.${NC}"
             continue
         fi
-
-        echo -e "\nValidating authentication token..."
-        # Clear existing configuration
-        if [ -f ~/.config/ngrok/ngrok.yml ]; then
-            rm ~/.config/ngrok/ngrok.yml
-        fi
-        # Add token and validate with API check
-        ngrok config add-authtoken "$NGROK_TOKEN" >/dev/null 2>&1
-        ngrok config check >/dev/null 2>&1
-        if [ $? -eq 0 ]; then
-            # Verify with actual API call
-            timeout 10 ngrok start --none >/dev/null 2>&1 &
-            sleep 3
-            API_RESPONSE=$(curl -s http://localhost:4040/api/tunnels)
-            killall ngrok >/dev/null 2>&1
-            if [[ "$API_RESPONSE" == *"invalid authtoken"* ]]; then
-                echo -e "${RED}✗ Token validation failed (invalid authtoken)${NC}"
-            elif [ -n "$API_RESPONSE" ]; then
-                echo -e "${GREEN}✓ ngrok has been successfully authenticated!${NC}"
-                break
-            else
-                echo -e "${RED}✗ Token validation failed (no API response)${NC}"
-            fi
-        else
-            echo -e "${RED}✗ Invalid authtoken detected${NC}"
-        fi
-        # Cleanup invalid configuration
-        if [ -f ~/.config/ngrok/ngrok.yml ]; then
-            rm ~/.config/ngrok/ngrok.yml
-        fi
     done
 
     # Start ngrok tunnel
