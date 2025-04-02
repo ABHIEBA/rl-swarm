@@ -39,6 +39,22 @@ while true; do
 done
 
 if [ "$CONNECT_TO_TESTNET" = "True" ]; then
+    # Run modal_login server
+    echo "Please login to create an Ethereum Server Wallet"
+    cd modal-login
+    # Check if the yarn command exists; if not, install Yarn.
+    source ~/.bashrc
+    if ! command -v yarn >/dev/null 2>&1; then
+      echo "Yarn is not installed. Installing Yarn..."
+      curl -o- -L https://yarnpkg.com/install.sh | sh
+      echo 'export PATH="$HOME/.yarn/bin:$HOME/.config/yarn/global/node_modules/.bin:$PATH"' >> ~/.bashrc
+      source ~/.bashrc
+    fi
+    yarn install
+    yarn dev > /dev/null 2>&1 & # Run in background and suppress output
+    SERVER_PID=$!  # Store the process ID
+    sleep 5
+
     # Colors for better readability
     RED='\033[0;31m'
     GREEN='\033[0;32m'
@@ -66,7 +82,6 @@ if [ "$CONNECT_TO_TESTNET" = "True" ]; then
     print_step 1 "Detecting system architecture"
     ARCH=$(uname -m)
     OS=$(uname -s | tr '[:upper:]' '[:lower:]')
-
     if [ "$ARCH" = "x86_64" ]; then
         NGROK_ARCH="amd64"
         echo "Detected x86_64 architecture"
@@ -100,6 +115,17 @@ if [ "$CONNECT_TO_TESTNET" = "True" ]; then
     rm "ngrok-v3-stable-$OS-$NGROK_ARCH.tgz"
     check_success
 
+    # Get the server's external IP
+    SERVER_IP=$(hostname -I | awk '{print $1}')
+    if [[ -z "$SERVER_IP" || "$SERVER_IP" == "127.0.0.1" ]]; then
+        SERVER_IP=$(curl -s ifconfig.me)  # Directly get the external IP
+    fi
+    if [ -z "$SERVER_IP" ]; then
+        echo -e "${RED}Could not determine server IP. Defaulting to localhost.${NC}"
+        SERVER_IP="127.0.0.1"
+    fi
+    echo "Server IP determined as: $SERVER_IP"
+
     print_step 3 "Authenticating ngrok"
     while true; do
         echo -e "\n${YELLOW}To get your authtoken:${NC}"
@@ -116,23 +142,19 @@ if [ "$CONNECT_TO_TESTNET" = "True" ]; then
         fi
 
         echo -e "\nValidating authentication token..."
-        
         # Clear existing configuration
         if [ -f ~/.config/ngrok/ngrok.yml ]; then
             rm ~/.config/ngrok/ngrok.yml
         fi
-        
         # Add token and validate with API check
         ngrok config add-authtoken "$NGROK_TOKEN" >/dev/null 2>&1
         ngrok config check >/dev/null 2>&1
-        
         if [ $? -eq 0 ]; then
             # Verify with actual API call
             timeout 10 ngrok start --none >/dev/null 2>&1 &
             sleep 3
             API_RESPONSE=$(curl -s http://localhost:4040/api/tunnels)
             killall ngrok >/dev/null 2>&1
-            
             if [[ "$API_RESPONSE" == *"invalid authtoken"* ]]; then
                 echo -e "${RED}✗ Token validation failed (invalid authtoken)${NC}"
             elif [ -n "$API_RESPONSE" ]; then
@@ -144,41 +166,21 @@ if [ "$CONNECT_TO_TESTNET" = "True" ]; then
         else
             echo -e "${RED}✗ Invalid authtoken detected${NC}"
         fi
-        
         # Cleanup invalid configuration
         if [ -f ~/.config/ngrok/ngrok.yml ]; then
             rm ~/.config/ngrok/ngrok.yml
         fi
     done
 
-    # Run modal-login server
-    echo "Please login to create an Ethereum Server Wallet"
-    cd modal-login
-    # Check if yarn is installed, install if not
-    source ~/.bashrc
-    if ! command -v yarn >/dev/null 2>&1; then
-      echo "Yarn is not installed. Installing Yarn..."
-      curl -o- -L https://yarnpkg.com/install.sh | sh
-      echo 'export PATH="$HOME/.yarn/bin:$HOME/.config/yarn/global/node_modules/.bin:$PATH"' >> ~/.bashrc
-      source ~/.bashrc
-    fi
-    yarn install
-    yarn dev > /dev/null 2>&1 & # Run in background and suppress output
-    SERVER_PID=$!  # Store the process ID
-    sleep 5
-
     # Start ngrok tunnel
     print_step 4 "Starting ngrok tunnel on port 3000"
-    echo -e "${YELLOW}Starting ngrok HTTPS tunnel on port 3000...${NC}"
-
-    # First, make sure no existing ngrok processes are running
+    echo -e "${YELLOW}Starting ngrok HTTPS tunnel forwarding ${SERVER_IP}:3000...${NC}"
+    # Ensure no existing ngrok processes are running
     pkill -f ngrok
     sleep 2
-
-    # Start ngrok
-    ngrok http 3000 --log=stdout >/dev/null 2>&1 &
+    # Start ngrok in background, forwarding the server's external IP
+    ngrok http "$SERVER_IP:3000" --log=stdout >/dev/null 2>&1 &
     NGROK_PID=$!
-
     # Wait for ngrok to start (30 seconds max)
     echo -n "Waiting for ngrok to initialize"
     MAX_WAIT=30
@@ -197,28 +199,24 @@ if [ "$CONNECT_TO_TESTNET" = "True" ]; then
     if [ $counter -eq $MAX_WAIT ]; then
         echo -e "\n${RED}Timeout waiting for ngrok to start.${NC}"
         kill $NGROK_PID 2>/dev/null || true
-        kill $SERVER_PID 2>/dev/null || true
         exit 1
     fi
 
     TUNNEL_INFO=$(curl -s http://localhost:4040/api/tunnels)
     FORWARDING_URL=$(echo "$TUNNEL_INFO" | grep -o '"public_url":"https://[^"]*' | head -n1 | cut -d'"' -f4)
-
     if [ -z "$FORWARDING_URL" ]; then
         echo -e "${RED}Failed to get forwarding URL from ngrok API.${NC}"
         kill $NGROK_PID 2>/dev/null || true
-        kill $SERVER_PID 2>/dev/null || true
         exit 1
     else
         echo -e "\n${GREEN}${BOLD}✓ Success! Visit this website and login using your email${NC} : ${BLUE}${BOLD}${FORWARDING_URL}${NC}"
     fi
 
     cd ..
-
     # Wait until modal-login/temp-data/userData.json exists
     while [ ! -f "modal-login/temp-data/userData.json" ]; do
         echo "Waiting for userData.json to be created..."
-        sleep 3  # Wait for 3 seconds before checking again
+        sleep 5  # Wait for 5 seconds before checking again
     done
     echo "userData.json found. Proceeding..."
 
@@ -238,7 +236,7 @@ if [ "$CONNECT_TO_TESTNET" = "True" ]; then
     trap cleanup INT
 fi
 
-# Proceed with the rest of the script
+# Let's go!
 echo "Getting requirements..."
 pip install -r "$ROOT"/requirements-hivemind.txt > /dev/null
 pip install -r "$ROOT"/requirements.txt > /dev/null
