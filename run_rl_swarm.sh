@@ -78,18 +78,17 @@ if [ "$CONNECT_TO_TESTNET" = "True" ]; then
         exit 1
     fi
 
-    # Define color codes for output
     RED='\033[0;31m'
     GREEN='\033[0;32m'
     YELLOW='\033[0;33m'
     BLUE='\033[0;34m'
     BOLD='\033[1m'
     NC='\033[0m'
-
+    
     print_step() {
         echo -e "\n${BLUE}${BOLD}Step $1: $2${NC}"
     }
-
+    
     check_success() {
         if [ $? -eq 0 ]; then
             echo -e "${GREEN}✓ Success!${NC}"
@@ -98,7 +97,7 @@ if [ "$CONNECT_TO_TESTNET" = "True" ]; then
             exit 1
         fi
     }
-
+    
     print_step 1 "Detecting system architecture"
     ARCH=$(uname -m)
     OS=$(uname -s | tr '[:upper:]' '[:lower:]')
@@ -115,24 +114,24 @@ if [ "$CONNECT_TO_TESTNET" = "True" ]; then
         echo -e "${RED}Unsupported architecture: $ARCH${NC}"
         exit 1
     fi
-
+    
     print_step 2 "Downloading and installing ngrok"
     echo -e "Downloading ngrok for $OS-$NGROK_ARCH..."
     wget -q --show-progress "https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-$OS-$NGROK_ARCH.tgz"
     check_success
-
+    
     echo "Extracting ngrok..."
     tar -xzf "ngrok-v3-stable-$OS-$NGROK_ARCH.tgz"
     check_success
-
+    
     echo "Moving ngrok to /usr/local/bin/ (requires sudo)..."
     sudo mv ngrok /usr/local/bin/
     check_success
-
+    
     echo "Cleaning up..."
     rm "ngrok-v3-stable-$OS-$NGROK_ARCH.tgz"
     check_success
-
+    
     print_step 3 "Authenticating ngrok"
     while true; do
         echo -e "\n${YELLOW}To get your authtoken:${NC}"
@@ -142,12 +141,16 @@ if [ "$CONNECT_TO_TESTNET" = "True" ]; then
         echo "4. Copy that auth token and paste in the below section"
         echo -e "\n${BOLD}Please enter your ngrok authtoken:${NC}"
         read -p "> " NGROK_TOKEN
-    
+        
         if [ -z "$NGROK_TOKEN" ]; then
             echo -e "${RED}No token provided. Please enter a valid token.${NC}"
             continue
         fi
-    
+        
+        # Ensure any previous ngrok processes are killed before authentication
+        pkill -f ngrok || true
+        sleep 2
+        
         ngrok authtoken "$NGROK_TOKEN"
         if [ $? -eq 0 ]; then
             echo -e "${GREEN}✓ Successfully authenticated ngrok!${NC}"
@@ -156,52 +159,104 @@ if [ "$CONNECT_TO_TESTNET" = "True" ]; then
             echo -e "${RED}✗ Authentication failed. Please check your token and try again.${NC}"
         fi
     done
-
-    print_step 4 "Checking ngrok web interface port availability"
-    if lsof -i :4040 >/dev/null 2>&1; then
-        echo -e "${YELLOW}Port 4040 is in use.${NC}"
-        PID=$(lsof -t -i :4040)
-        echo "Forcefully killing process $PID using port 4040..."
-        kill -9 $PID
-        sleep 2
-        if lsof -i :4040 >/dev/null 2>&1; then
-            echo -e "${RED}Could not free port 4040. Please check manually.${NC}"
-            exit 1
-        else
-            echo -e "${GREEN}✓ Port 4040 freed successfully.${NC}"
-        fi
-    else
-        echo "Port 4040 is free."
-    fi
-
+    
+    print_step 4 "Preparing for ngrok tunnel"
+    # Kill any existing ngrok processes
+    echo "Terminating any existing ngrok processes..."
+    pkill -f ngrok || true
+    sleep 3
+    
+    # Find available ports for ngrok web interface
+    NGROK_WEB_PORT=4040
+    while lsof -i :$NGROK_WEB_PORT >/dev/null 2>&1; do
+        echo -e "${YELLOW}Port $NGROK_WEB_PORT is in use, trying next port...${NC}"
+        NGROK_WEB_PORT=$((NGROK_WEB_PORT + 1))
+    done
+    echo -e "${GREEN}Will use port $NGROK_WEB_PORT for ngrok web interface${NC}"
+    
     print_step 5 "Starting ngrok tunnel on port $PORT"
     echo -e "${YELLOW}Starting ngrok HTTPS tunnel forwarding localhost:$PORT...${NC}"
-    pkill -f ngrok
-    sleep 2
     
-    ngrok http "$PORT" > ngrok.log 2>&1 &
+    # Try multiple approaches to start ngrok and get the URL
+    echo "Using primary approach with direct log capture..."
+    
+    # Start ngrok with specific web interface port
+    ngrok http "$PORT" --log=stdout --log-format=json --log-level=info > ngrok_output.log 2>&1 &
     NGROK_PID=$!
     
+    # Function to extract URL from various sources
+    get_forwarding_url() {
+        # Try to get URL from log file first
+        FORWARDING_URL=$(grep -o '"url":"https://[^"]*' ngrok_output.log 2>/dev/null | head -n1 | cut -d'"' -f4)
+        
+        # If not found, try the API approach with the detected web port
+        if [ -z "$FORWARDING_URL" ]; then
+            for try_port in $(seq $NGROK_WEB_PORT $((NGROK_WEB_PORT + 5))); do
+                if curl -s "http://localhost:$try_port/api/tunnels" >/dev/null 2>&1; then
+                    FORWARDING_URL=$(curl -s "http://localhost:$try_port/api/tunnels" | grep -o '"public_url":"https://[^"]*' | head -n1 | cut -d'"' -f4)
+                    if [ -n "$FORWARDING_URL" ]; then
+                        echo -e "${GREEN}Found ngrok web interface at port $try_port${NC}"
+                        break
+                    fi
+                fi
+            done
+        fi
+        
+        # If still not found, try old-style output parsing as last resort
+        if [ -z "$FORWARDING_URL" ]; then
+            FORWARDING_URL=$(grep -m 1 "Forwarding" ngrok_output.log 2>/dev/null | grep -o "https://[^ ]*")
+        fi
+        
+        echo "$FORWARDING_URL"
+    }
+    
     echo "Waiting for ngrok to initialize"
-    MAX_WAIT=10
+    MAX_WAIT=5
     counter=0
     
     while [ $counter -lt $MAX_WAIT ]; do
         echo -n "."
-        if curl -s http://localhost:4040/api/tunnels >/dev/null 2>&1; then
-            echo " API Ready!"
+        FORWARDING_URL=$(get_forwarding_url)
+        
+        if [ -n "$FORWARDING_URL" ]; then
+            echo -e "\n${GREEN}✓ URL found!${NC}"
             break
         fi
         sleep 1
         counter=$((counter + 1))
     done
     
-    if [ $counter -eq $MAX_WAIT ]; then
-        echo -e "${RED}Timeout waiting for ngrok API.${NC}"
-        FORWARDING_URL=""
-    else
-        FORWARDING_URL=$(curl -s http://localhost:4040/api/tunnels | grep -o '"public_url":"https://[^"]*' | head -n1 | cut -d'"' -f4)
-    fi
+    # If primary approach failed, try alternative approach
+    if [ -z "$FORWARDING_URL" ]; then
+        echo -e "\n${YELLOW}Primary approach failed. Trying alternative approach...${NC}"
+        
+        # Kill existing ngrok process and try with explicit region and random port
+        kill $NGROK_PID 2>/dev/null || true
+        sleep 3
+        
+        # Try with a different random port for ngrok API
+        RANDOM_PORT=$((10000 + RANDOM % 20000))
+        echo "Starting ngrok on random port $RANDOM_PORT..."
+        
+        ngrok http --region us --log=stdout "$PORT" > ngrok_output_alt.log 2>&1 &
+        NGROK_PID=$!
+        
+        sleep 10
+        
+        # Try multiple ways to get the URL
+        FORWARDING_URL=$(grep -o '"url":"https://[^"]*' ngrok_output_alt.log 2>/dev/null | head -n1 | cut -d'"' -f4)
+        
+        if [ -z "$FORWARDING_URL" ]; then
+            for check_port in $(seq 4040 4050); do
+                if curl -s "http://localhost:$check_port/api/tunnels" >/dev/null 2>&1; then
+                    FORWARDING_URL=$(curl -s "http://localhost:$check_port/api/tunnels" | grep -o '"public_url":"https://[^"]*' | head -n1 | cut -d'"' -f4)
+                    if [ -n "$FORWARDING_URL" ]; then
+                        break
+                    fi
+                fi
+            done
+        fi
+    fi  
     
     if [ -n "$FORWARDING_URL" ]; then
         echo -e "${GREEN}${BOLD}✓ Success! Visit this website and login using your email${NC} : ${BLUE}${BOLD}${FORWARDING_URL}${NC}"
