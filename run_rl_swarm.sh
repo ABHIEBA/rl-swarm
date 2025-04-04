@@ -41,18 +41,20 @@ if [ "$CONNECT_TO_TESTNET" = "True" ]; then
     cd modal-login
     source ~/.bashrc
 
-    # Install Yarn if not present
-    if ! command -v yarn >/dev/null 2>&1; then
-        echo "Yarn is not installed. Installing Yarn..."
-        curl -o- -L https://yarnpkg.com/install.sh | sh
-        echo 'export PATH="$HOME/.yarn/bin:$HOME/.config/yarn/global/node_modules/.bin:$PATH"' >> ~/.bashrc
+    # Install npm if not present
+    if ! command -v npm >/dev/null 2>&1; then
+        echo "npm is not installed. Installing Node.js and npm..."
+        curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+        sudo apt-get install -y nodejs
         source ~/.bashrc
     fi
-    yarn install
+    
+    echo "Installing dependencies with npm (may take few mins, depend on your internet speed)..."
+    npm install --legacy-peer-deps
 
     # Start the development server in the background
     echo "Starting the development server..."
-    yarn next dev > server.log 2>&1 &
+    npm run dev > server.log 2>&1 &
     SERVER_PID=$!
     
     echo "Waiting for server to start..."
